@@ -1,0 +1,36 @@
+--==================================================================================
+-- 
+-- Replace 'MyDataset' with the name of your bigquery dataset
+-- 
+--==================================================================================
+
+DROP TABLE IF EXISTS MyDataset.social_DM_disconnected_pairs;
+Create table MyDataset.social_DM_disconnected_pairs (
+    user_id                  BIGINT,
+    not_connected_to_user_id BIGINT
+);
+INSERT INTO  MyDataset.social_DM_disconnected_pairs (
+    user_id,
+    not_connected_to_user_id
+)
+/*
+list all the disconnected pairs
+*/
+WITH all_pairs AS (
+SELECT 
+  L.user_id  AS left_user_id
+  ,R.user_id AS right_user_id
+FROM
+  MyDataset.social_DM_users L
+  ,MyDataset.social_DM_users R
+WHERE (L.user_id != R.user_id)
+)
+SELECT 
+  all_pairs.left_user_id      AS user_id
+  ,all_pairs.right_user_id    AS not_connected_to_user_id
+FROM all_pairs
+LEFT JOIN MyDataset.social_DM_paths paths ON ( (all_pairs.left_user_id = paths.user_id AND all_pairs.right_user_id = paths.friend_id))
+WHERE paths.user_id IS NULL 
+ORDER BY 
+  all_pairs.left_user_id
+  ,all_pairs.right_user_id;
