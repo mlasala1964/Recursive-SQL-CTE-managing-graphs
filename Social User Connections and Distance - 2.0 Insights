@@ -1,0 +1,96 @@
+--==================================================================================
+-- 
+-- Replace 'MyDataset' with the name of your bigquery dataset
+-- 
+--==================================================================================
+/*
+nr of direct and indirect friends by user
+*/
+
+SELECT
+  U.user_id
+  ,U.user_name
+  ,U.age_group
+  ,U.education_level
+  ,COUNT(*) AS nr_friends
+FROM MyDataset.social_DM_paths P
+INNER JOIN MyDataset.social_DM_users U on (P.user_id = U.user_id)
+WHERE P.distance > 0
+GROUP BY
+  U.user_id
+  ,U.user_name
+  ,U.age_group
+  ,U.education_level
+ORDER BY
+nr_friends, U.user_id;
+
+--==================================================================================
+/*
+Tracing and analyzing the expansion of connections from a central node, for example the user 1 
+*/
+
+SELECT 
+  P.user_id, U.education_level AS user_education
+  ,P.friend_id, F.education_level AS friend_education
+  ,P.path, N1.education_level AS n1_education, N2.education_level AS n2_education, N3.education_level AS n3_education  
+FROM MyDataset.social_DM_paths P
+INNER JOIN MyDataset.social_DM_users U on (P.user_id = U.user_id)
+INNER JOIN MyDataset.social_DM_users F on (P.friend_id = F.user_id)
+LEFT JOIN MyDataset.social_DM_users N1 on (P.path_node_1 = N1.user_id)
+LEFT JOIN MyDataset.social_DM_users N2 on (P.path_node_2 = N2.user_id)
+LEFT JOIN MyDataset.social_DM_users N3 on (P.path_node_3 = N3.user_id)
+-- ..
+-- ..
+WHERE P.user_id = 1
+order by P.path
+;
+
+--==================================================================================
+/*
+Distribution of connections by the path's distance
+*/
+
+SELECT distance,      COUNT(*) / 2 AS nr_connections
+FROM MyDataset.social_DM_paths
+WHERE distance > 0
+GROUP BY distance
+UNION ALL
+SELECT 0 AS distance, COUNT(*) / 2 AS nr_connections
+FROM MyDataset.social_DM_disconnected_pairs
+order by distance;
+
+--========================================================================
+/*
+Path's education affinity weight 
+*/
+WITH social_path_and_education_affinity AS (
+SELECT 
+  P.user_id, U.user_name, U.education_level AS user_education, P.path, P.distance,
+  (CASE WHEN U.education_level = F.education_level THEN 1 ELSE 0 END
+  +CASE WHEN U.education_level = COALESCE(N1.education_level, '---') THEN 1 ELSE 0 END
+  +CASE WHEN U.education_level = COALESCE(N2.education_level, '---') THEN 1 ELSE 0 END
+  +CASE WHEN U.education_level = COALESCE(N3.education_level, '---') THEN 1 ELSE 0 END
+  +CASE WHEN U.education_level = COALESCE(N4.education_level, '---') THEN 1 ELSE 0 END
+  +CASE WHEN U.education_level = COALESCE(N5.education_level, '---') THEN 1 ELSE 0 END
+  +CASE WHEN U.education_level = COALESCE(N6.education_level, '---') THEN 1 ELSE 0 END
+  +CASE WHEN U.education_level = COALESCE(N7.education_level, '---') THEN 1 ELSE 0 END
+  ) /CAST(P.distance AS FLOAT64) AS education_affinity
+  ,F.education_level AS friend_education
+  ,N1.education_level AS n1_education, N2.education_level AS n2_education, N3.education_level AS n3_education, N4.education_level AS n4_education
+  ,N5.education_level AS n5_education, N6.education_level AS n6_education, N7.education_level AS n7_education
+FROM MyDataset.social_DM_paths P
+INNER JOIN MyDataset.social_DM_users U on (P.user_id = U.user_id)
+INNER JOIN MyDataset.social_DM_users F on (P.friend_id = F.user_id)
+LEFT JOIN MyDataset.social_DM_users N1 on (P.path_node_1 = N1.user_id)
+LEFT JOIN MyDataset.social_DM_users N2 on (P.path_node_2 = N2.user_id)
+LEFT JOIN MyDataset.social_DM_users N3 on (P.path_node_3 = N3.user_id)
+LEFT JOIN MyDataset.social_DM_users N4 on (P.path_node_4 = N4.user_id)
+LEFT JOIN MyDataset.social_DM_users N5 on (P.path_node_5 = N5.user_id)
+LEFT JOIN MyDataset.social_DM_users N6 on (P.path_node_6 = N6.user_id)
+LEFT JOIN MyDataset.social_DM_users N7 on (P.path_node_7 = N7.user_id)
+)
+SELECT user_id, user_name,  user_education, AVG(education_affinity) AS education_affinity
+FROM social_path_and_education_affinity
+GROUP BY user_id, user_name, user_education
+order by education_affinity desc;
+
