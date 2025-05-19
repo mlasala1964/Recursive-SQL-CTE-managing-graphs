@@ -1,0 +1,55 @@
+--==================================================================================
+-- 
+-- Replace 'MyDataset' with the name of your bigquery dataset
+-- 
+--==================================================================================
+
+DROP TABLE IF EXISTS MyDataset.social_DM_users;
+Create table MyDataset.social_DM_users (
+    user_id                 BIGINT,
+    ,user_name              STRING,
+    ,birth_date             DATE,
+    ,age_group              STRING    --  > 1999   : 1. Generation Z
+                                      --  1990-1999: 2. Younger Millennials
+                                      --  < 1990   : 3. Older Millennials
+
+    ,id_study_level         INT,
+    ,study_level            STRING    -- 0. Basic (0 None, 1 Elementary School, 2 Middle School, 3 High School
+                                      -- 1. Intermediate (4 Associate's Degree, 5 Bachelor's Degree)
+                                      -- 2. Advanced (6 Master's Degree, 7 Doctorate)
+    ,education_level        STRING
+    ,globally_disconnected  BOOLEAN
+);
+
+INSERT INTO  MyDataset.social_DM_users (
+    user_id
+    ,user_name
+    ,birth_date
+    ,age_group
+    ,id_study_level
+    ,study_level
+    ,education_level
+    ,globally_disconnected)
+SELECT
+    user_id             AS user_id
+    ,user_name          AS user_name
+    ,birth_date         AS birth_date
+    ,CASE
+        WHEN EXTRACT(YEAR FROM birth_date) > 1999                   THEN '1. Generation Z (2000- today)'
+        WHEN EXTRACT(YEAR FROM birth_date) BETWEEN  1990 AND 1999   THEN '2. Younger Millennials (1990 to 1999)'
+        WHEN EXTRACT(YEAR FROM birth_date) BETWEEN  1980 AND 1989   THEN '3. Older Millennials (1990 to 1999)'
+        ELSE '4. Aged'      
+    END                 AS age_group
+    ,id_education_level AS id_study_level
+    ,education_level    AS study_level
+    ,CASE 
+        WHEN id_education_level IN (0, 1, 2, 3) THEN '1. Basic'
+        WHEN id_education_level IN (4, 5)       THEN '2. Intermediate'
+        WHEN id_education_level IN (6, 7)       THEN '3. Advanced'
+        ELSE '4. Undefinied'
+    END                AS education_level
+    ,CASE
+        WHEN (SELECT COUNT(*) FROM MyDataset.social_DM_paths social_DM_paths WHERE social_users.user_id = social_DM_paths.user_id AND social_DM_paths.distance = 0) = 1 THEN TRUE 
+        ELSE FALSE
+    END               AS globally_disconnected
+FROM MyDataset.social_users social_users;
