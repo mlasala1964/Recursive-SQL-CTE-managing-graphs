@@ -1,1 +1,149 @@
+--==================================================================================
+-- 
+-- Replace 'MyDataset' with the name of your bigquery dataset
+-- 
+--==================================================================================
+
+DROP TABLE IF EXISTS MyDataset.social_DM_paths;
+Create table MyDataset.social_DM_paths (
+    user_id BIGINT,
+    friend_id BIGINT,
+    distance INTEGER,
+    path STRING,            --> for performance reasons I'm not sure to keep this field and 
+                            --> it could be easily computed from the other fields in the same row
+    path_node_1 BIGINT,
+    path_node_2 BIGINT,
+    path_node_3 BIGINT,
+    path_node_4 BIGINT,
+    path_node_5 BIGINT,
+    path_node_6 BIGINT,
+    path_node_7 BIGINT
+);
+
+
+INSERT INTO MyDataset.social_DM_paths (
+    user_id, friend_id, distance, path, path_node_1, path_node_2, path_node_3, path_node_4, path_node_5, path_node_6, path_node_7
+)
+
+/*
+
+In this case study, the connection between users is treated  as an edge - undirected line -  and not as an arc - directed line -to reflect the reciprocal and mutual nature of friendship! If user_A is a friend of user_B, then user_B is a friend of user_A too :-)
+
+*/
+
+
+/*
+===============
+mutual_friends: 
+===============
+in addition to the phisical rows in the social_network table,  any missing "mutual" connections are added - i.e. the phisical row (1,2) generates the rows (1,2) and (2,1)
+*/
+WITH RECURSIVE mutual_friends AS (
+    SELECT user_id, friend_id
+    FROM MyDataset.social_network
+    WHERE user_id <> friend_id
+UNION DISTINCT
+    SELECT friend_id AS user_id, user_id as friend_id
+    FROM MyDataset.social_network 
+    WHERE user_id <> friend_id
+),
+/*
+=================
+user_connections: 
+=================
+for every defined user finds all the friends, the friends of friends, .... recursively. The Recursive computation is stopped when the distance between 2 friends is greater than 7 steps -i.e. user_connections.level <= 8 -.
+The table implements the flattening feature of a graph / tree: all the nodes in the path between A and B are persisted. It's easy to avoid circular routes : the "new friend" must be a node not already present in the path
+The user_connections table could contain different rows for a single pair of nodes: one row for each different path (<= 8 steps) connecting node A to node B
+*/
+user_connections AS (
+    SELECT 
+        social_users.user_id                                            AS user_id
+        ,friend_id                                                      AS friend_id 
+        ,CASE WHEN mutual_friends.friend_id IS NULL THEN 0 ELSE 1 END   AS level
+        ,LPAD(CAST(social_users.user_id AS STRING), 6, ' ') || '->' || LPAD(CAST(mutual_friends.friend_id AS STRING), 6, ' ') AS prg
+        ,NULL AS path_lev1, NULL AS path_lev2, NULL AS path_lev3, NULL AS path_lev4, NULL AS path_lev5, NULL AS path_lev6, NULL AS path_lev7 
+    FROM MyDataset.social_users social_users
+    LEFT JOIN mutual_friends ON social_users.user_id = mutual_friends.user_id
+UNION ALL
+    -- Recursive query: 
+    -- 1. Find friends of friends
+    -- 2. flattening the chain of friends in the path level_i field
+    -- 3. avoid the loop in the path : the "new friend" must be a node not already present in the path
+    -- 4. limit the path's distance to a little number
+    SELECT 
+        user_connections.user_id                                        AS user_id
+        ,mutual_friends.friend_id                                       AS friend_id
+        ,user_connections.level + 1                                     AS level
+        ,user_connections.prg || '->' || LPAD(CAST(mutual_friends.friend_id AS STRING), 6, ' ') AS prg
+        -->
+        --> Intemediate nodes of the path are persisted and flattened in 7 distinct fields: path with distance less than 9 are well managed! 
+        --> But :-) if the "six degrees of separation" theory is correct then we should be confident to stay in the limits
+        ,CASE WHEN user_connections.level = 1 THEN user_connections.friend_id ELSE user_connections.path_lev1 END AS path_lev1
+        ,CASE WHEN user_connections.level = 2 THEN user_connections.friend_id ELSE user_connections.path_lev2 END AS path_lev2
+        ,CASE WHEN user_connections.level = 3 THEN user_connections.friend_id ELSE user_connections.path_lev3 END AS path_lev3
+        ,CASE WHEN user_connections.level = 4 THEN user_connections.friend_id ELSE user_connections.path_lev4 END AS path_lev4
+        ,CASE WHEN user_connections.level = 5 THEN user_connections.friend_id ELSE user_connections.path_lev5 END AS path_lev5
+        ,CASE WHEN user_connections.level = 6 THEN user_connections.friend_id ELSE user_connections.path_lev6 END AS path_lev6
+        ,CASE WHEN user_connections.level = 7 THEN user_connections.friend_id ELSE user_connections.path_lev7 END AS path_lev7
+    FROM user_connections
+    JOIN mutual_friends ON user_connections.friend_id = mutual_friends.user_id
+    WHERE 
+            /*
+            condition to avoid cycles in the path's computation:
+            The first condition is performing well but limited to path with distance <= 8
+            The second condition works for any distance of the path
+            */
+            --mutual_friends.friend_id NOT IN (user_connections.user_id
+            --                                ,COALESCE(user_connections.path_lev1, -1),COALESCE(user_connections.path_lev2, -1)
+            --                                ,COALESCE(user_connections.path_lev3, -1),COALESCE(user_connections.path_lev4, -1)
+            --                                ,COALESCE(user_connections.path_lev5, -1),COALESCE(user_connections.path_lev6, -1)
+            --                                ,COALESCE(user_connections.path_lev7, -1)
+            --                                ) 
+            user_connections.prg NOT LIKE '%' || LPAD(CAST(mutual_friends.friend_id AS STRING), 6, ' ') || '%'
+      AND user_connections.level <= 15 --> Mind that the paths with distance between 9 and 16 are not well managed in path_level_i 
+),
+/*
+====================
+shortest_connections: 
+====================
+Filters only the rows with the shortest path. The field user_connections.level is the distance of the path connecting 2 nodes.
+*/
+shortest_connections AS  ( -- 
+SELECT
+        user_connections.user_id    AS user_id
+        ,user_connections.friend_id AS friend_id 
+        ,user_connections.level     AS level
+        ,user_connections.prg       AS prg
+        ,RANK() OVER (PARTITION BY user_connections.user_id, user_connections.friend_id ORDER BY user_connections.level, user_connections.prg) AS path_rank
+        ,user_connections.path_lev1 AS path_lev1
+        ,user_connections.path_lev2 AS path_lev2
+        ,user_connections.path_lev3 AS path_lev3
+        ,user_connections.path_lev4 AS path_lev4
+        ,user_connections.path_lev5 AS path_lev5
+        ,user_connections.path_lev6 AS path_lev6
+        ,user_connections.path_lev7 AS path_lev7 
+
+FROM
+    user_connections
+
+)
+SELECT 
+    user_id             AS user_id
+    ,friend_id          AS friend_id
+    ,level              AS distance
+    ,prg                AS path
+    ,path_lev1          AS path_node_1
+    ,path_lev2          AS path_node_2
+    ,path_lev3          AS path_node_3
+    ,path_lev4          AS path_node_4
+    ,path_lev5          AS path_node_5
+    ,path_lev6          AS path_node_6
+    ,path_lev7          AS path_node_7
+FROM 
+    shortest_connections
+WHERE 
+    path_rank = 1
+ORDER BY 
+    prg;
+
 
