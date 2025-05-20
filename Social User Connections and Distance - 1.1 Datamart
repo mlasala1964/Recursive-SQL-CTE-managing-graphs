@@ -53,7 +53,7 @@ user_connections:
 =================
 for every defined user finds all the friends, the friends of friends, .... recursively. The Recursive computation is stopped when the distance between 2 friends is greater than 7 steps -i.e. user_connections.level <= 8 -.
 The table implements the flattening feature of a graph / tree: all the nodes in the path between A and B are persisted. It's easy to avoid circular routes : the "new friend" must be a node not already present in the path
-The user_connections table could contain different rows for a single pair of nodes: one row for each different path (<= 8 steps) connecting node A to node B
+The user_connections table could contain different rows for a single pair of nodes: one row for each different path connecting node A to node B
 */
 user_connections AS (
     SELECT 
@@ -92,6 +92,8 @@ UNION ALL
             condition to avoid cycles in the path's computation:
             The first condition is performing well but limited to path with distance <= 8
             The second condition works for any distance of the path
+            :-( but maybe there is an error, :-) are you able to fix it? Fixed a user and friend pair, are we sure that we'll manage the shortest path before a longer one?
+
             */
             --mutual_friends.friend_id NOT IN (user_connections.user_id
             --                                ,COALESCE(user_connections.path_lev1, -1),COALESCE(user_connections.path_lev2, -1)
